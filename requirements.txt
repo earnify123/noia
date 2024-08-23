@@ -1,4 +1,4 @@
-Flask0
+Flask
 Flask-Login
 Flask-WTF
 Flask-SQLAlchemy

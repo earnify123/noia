@@ -1,65 +1,63 @@
-from flask import Flask, render_template, request, redirect, url_for, session, flash
-import firebase_admin
-from firebase_admin import credentials, auth
+from flask import Flask, render_template, redirect, url_for, request, flash
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
+from werkzeug.security import generate_password_hash, check_password_hash
 
-# Initialize the Flask app
 app = Flask(__name__)
-app.secret_key = 'your-secret-key'  # Change this to a real secret key
+app.config['SECRET_KEY'] = 'your_secret_key'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
+db = SQLAlchemy(app)
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
 
-# Initialize Firebase Admin SDK
-cred = credentials.Certificate('serviceAccountKey.json')
-firebase_admin.initialize_app(cred)
+class User(UserMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(150), unique=True, nullable=False)
+    password = db.Column(db.String(150), nullable=False)
 
-@app.route('/')
-def index():
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        email = request.form.get('email')
+        password = request.form.get('password')
+        user = User.query.filter_by(email=email).first()
+        if user and check_password_hash(user.password, password):
+            login_user(user)
+            return redirect(url_for('welcome'))
+        else:
+            flash('Invalid email or password')
     return render_template('login.html')
 
-@app.route('/register')
-def register():
-    return render_template('register.html')
-
-@app.route('/do_register', methods=['POST'])
-def do_register():
-    email = request.form.get('email')
-    password = request.form.get('password')
-    try:
-        user = auth.create_user(email=email, password=password)
-        flash('Registration successful. You can now log in.', 'success')
-        return redirect(url_for('index'))
-    except Exception as e:
-        flash(f'Error: {str(e)}', 'error')
-        return redirect(url_for('register'))
-
-@app.route('/login', methods=['POST'])
-def login():
-    email = request.form.get('email')
-    password = request.form.get('password')
-    try:
-        user = auth.get_user_by_email(email)
-        # Simulate password check for demonstration purposes
-        # In practice, Firebase handles this for you on the client side
-        # Firebase's admin SDK doesn't support password verification directly
-        # You would need to verify passwords on the client side or use Firebase client SDK
-        session['user_id'] = user.uid
+@app.route('/register', methods=['GET', 'POST'])
+def signup():
+    if request.method == 'POST':
+        email = request.form.get('email')
+        password = request.form.get('password')
+        hashed_password = generate_password_hash(password, method='sha256')
+        new_user = User(email=email, password=hashed_password)
+        db.session.add(new_user)
+        db.session.commit()
+        login_user(new_user)
         return redirect(url_for('welcome'))
-    except auth.UserNotFoundError:
-        flash('Invalid email or password.', 'error')
-        return redirect(url_for('index'))
+    return render_template('signup.html')
 
 @app.route('/welcome')
+@login_required
 def welcome():
-    user_id = session.get('user_id')
-    if not user_id:
-        return redirect(url_for('index'))
-    
-    user = auth.get_user(user_id)
-    return render_template('welcome.html', user=user)
+    return render_template('welcome.html', name=current_user.email)
 
 @app.route('/logout')
+@login_required
 def logout():
-    session.clear()
-    return redirect(url_for('index'))
+    logout_user()
+    return redirect(url_for('login'))
 
 if __name__ == '__main__':
+    db.create_all()
     app.run(debug=True)
     
